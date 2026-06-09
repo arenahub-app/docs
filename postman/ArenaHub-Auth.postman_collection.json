@@ -1,0 +1,942 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "name": "ArenaHub — Autenticação",
+    "description": "Collection completa do módulo de autenticação (Etapa 4, Módulo 1).\n\nFluxo automatizado:\n1. Registro → 2. Verificação de email via MailHog → 3. Login → 4. Refresh → 5. Logout\n\nRequisitos para testes automáticos:\n- Backend rodando em {{baseUrl}}\n- MailHog rodando em {{mailhogUrl}} (docker-compose)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "accessToken",             "value": "",          "type": "string" },
+    { "key": "refreshToken",            "value": "",          "type": "string" },
+    { "key": "testEmail",               "value": "",          "type": "string" },
+    { "key": "testPassword",            "value": "Senha@123", "type": "string" },
+    { "key": "testName",                "value": "Usuário Postman", "type": "string" },
+    { "key": "testPhone",               "value": "11999999999", "type": "string" },
+    { "key": "emailVerificationToken",  "value": "",          "type": "string" },
+    { "key": "passwordResetToken",      "value": "",          "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "🔐 Registro & Verificação de Email",
+      "description": "Fluxo: registro → MailHog busca token → verificação de email",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Gerar email único para cada execução do runner",
+              "const ts = Date.now();",
+              "pm.collectionVariables.set('testEmail', `postman.${ts}@arenahub.test`);",
+              "pm.collectionVariables.set('testName', 'Usuário Postman ' + ts);"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "POST Registrar usuário",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"name\": \"{{testName}}\",\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\",\n  \"phone\": \"{{testPhone}}\",\n  \"birthDate\": \"1990-05-20\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "register"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "",
+                  "pm.test('Access token presente e salvo', function() {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.accessToken).to.be.a('string').and.not.be.empty;",
+                  "    pm.expect(json.tokenType).to.equal('Bearer');",
+                  "    pm.expect(json.expiresIn).to.be.a('number').and.be.above(0);",
+                  "    pm.collectionVariables.set('accessToken', json.accessToken);",
+                  "});",
+                  "",
+                  "pm.test('Cookie refresh_token HttpOnly definido', function() {",
+                  "    const setCookie = pm.response.headers.get('Set-Cookie') || '';",
+                  "    pm.expect(setCookie).to.include('refresh_token=');",
+                  "    pm.expect(setCookie.toLowerCase()).to.include('httponly');",
+                  "    pm.expect(setCookie).to.include('SameSite=Strict');",
+                  "    const match = setCookie.match(/refresh_token=([^;]+)/);",
+                  "    if (match) pm.collectionVariables.set('refreshToken', match[1]);",
+                  "});",
+                  "",
+                  "pm.test('Schema da resposta correto', function() {",
+                  "    pm.response.to.have.jsonSchema({",
+                  "        type: 'object',",
+                  "        required: ['accessToken', 'tokenType', 'expiresIn'],",
+                  "        properties: {",
+                  "            accessToken: { type: 'string' },",
+                  "            tokenType:   { type: 'string' },",
+                  "            expiresIn:   { type: 'number' }",
+                  "        }",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET [MailHog] Buscar token de verificação",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{mailhogUrl}}/api/v2/messages?limit=10",
+              "host": ["{{mailhogUrl}}"],
+              "path": ["api", "v2", "messages"],
+              "query": [{ "key": "limit", "value": "10" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('MailHog acessível', () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test('Email de verificação encontrado', function() {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.items).to.be.an('array').and.not.be.empty;",
+                  "",
+                  "    const testEmail = pm.collectionVariables.get('testEmail');",
+                  "    let emailBody = '';",
+                  "",
+                  "    // Busca o email destinado ao testEmail",
+                  "    const item = body.items.find(i =>",
+                  "        i.To && i.To.some(t => (t.Mailbox + '@' + t.Domain) === testEmail)",
+                  "    ) || body.items[0];",
+                  "",
+                  "    pm.expect(item, 'Email não encontrado no MailHog').to.exist;",
+                  "",
+                  "    // Extrai corpo — tenta Content.Body ou MIME.Parts",
+                  "    if (item.Content && item.Content.Body) {",
+                  "        emailBody = item.Content.Body;",
+                  "    } else if (item.MIME && item.MIME.Parts) {",
+                  "        const html = item.MIME.Parts.find(p =>",
+                  "            p.Headers && p.Headers['Content-Type'] &&",
+                  "            p.Headers['Content-Type'][0].includes('text/html')",
+                  "        );",
+                  "        if (html) emailBody = html.Body;",
+                  "    }",
+                  "",
+                  "    const match = emailBody.match(/verify-email\\?token=([^\"&\\s<>\\r\\n]+)/);",
+                  "    pm.expect(match, 'Token não encontrado no corpo do email').to.exist;",
+                  "    pm.collectionVariables.set('emailVerificationToken', match[1]);",
+                  "    console.log('Token de verificação salvo:', match[1].substring(0, 20) + '...');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET Verificar email",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/verify-email?token={{emailVerificationToken}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "verify-email"],
+              "query": [{ "key": "token", "value": "{{emailVerificationToken}}" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204 No Content', () => pm.response.to.have.status(204));",
+                  "pm.test('Sem corpo na resposta', () => pm.expect(pm.response.text()).to.be.empty);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "🔑 Login & Sessão",
+      "description": "Login, renovação de token e logout",
+      "item": [
+        {
+          "name": "POST Login (email não verificado → 403)",
+          "description": "Deve falhar com 403 se o email não foi verificado. Use um email recém-registrado sem verificar.",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"email\": \"nao.verificado@arenahub.test\",\n  \"password\": \"{{testPassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "login"]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Registrar um novo usuário sem verificar email",
+                  "const ts = Date.now();",
+                  "const unverifiedEmail = `unverified.${ts}@arenahub.test`;",
+                  "pm.collectionVariables.set('unverifiedEmail', unverifiedEmail);",
+                  "",
+                  "pm.sendRequest({",
+                  "    url: pm.variables.get('baseUrl') + '/api/v1/auth/register',",
+                  "    method: 'POST',",
+                  "    header: { 'Content-Type': 'application/json' },",
+                  "    body: {",
+                  "        mode: 'raw',",
+                  "        raw: JSON.stringify({",
+                  "            name: 'Não Verificado',",
+                  "            email: unverifiedEmail,",
+                  "            password: 'Senha@123',",
+                  "            phone: '11888888888',",
+                  "            birthDate: '1995-01-01'",
+                  "        })",
+                  "    }",
+                  "}, (err, res) => {",
+                  "    if (err) console.error('Erro ao registrar usuário de teste:', err);",
+                  "    // Substituir email no body da request atual",
+                  "    pm.request.body.update({",
+                  "        mode: 'raw',",
+                  "        raw: JSON.stringify({ email: unverifiedEmail, password: 'Senha@123' })",
+                  "    });",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403 Forbidden (email não verificado)', () => pm.response.to.have.status(403));",
+                  "",
+                  "pm.test('Código de erro correto', function() {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.status).to.equal(403);",
+                  "    pm.expect(json.type).to.include('email-not-verified');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Login válido",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "login"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test('Access token presente e salvo', function() {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.accessToken).to.be.a('string').and.not.be.empty;",
+                  "    pm.expect(json.tokenType).to.equal('Bearer');",
+                  "    pm.collectionVariables.set('accessToken', json.accessToken);",
+                  "});",
+                  "",
+                  "pm.test('Refresh token cookie renovado', function() {",
+                  "    const setCookie = pm.response.headers.get('Set-Cookie') || '';",
+                  "    pm.expect(setCookie).to.include('refresh_token=');",
+                  "    const match = setCookie.match(/refresh_token=([^;]+)/);",
+                  "    if (match) pm.collectionVariables.set('refreshToken', match[1]);",
+                  "});",
+                  "",
+                  "pm.test('Tempo de expiração razoável', function() {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.expiresIn).to.be.above(0).and.at.most(86400);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Renovar sessão (refresh)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Cookie", "value": "refresh_token={{refreshToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "refresh"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test('Novo access token emitido', function() {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.accessToken).to.be.a('string').and.not.be.empty;",
+                  "    const oldToken = pm.collectionVariables.get('accessToken');",
+                  "    pm.expect(json.accessToken).to.not.equal(oldToken);",
+                  "    pm.collectionVariables.set('accessToken', json.accessToken);",
+                  "});",
+                  "",
+                  "pm.test('Novo refresh token emitido (rotação)', function() {",
+                  "    const setCookie = pm.response.headers.get('Set-Cookie') || '';",
+                  "    pm.expect(setCookie).to.include('refresh_token=');",
+                  "    const match = setCookie.match(/refresh_token=([^;]+)/);",
+                  "    if (match) {",
+                  "        const newToken = match[1];",
+                  "        const oldToken = pm.collectionVariables.get('refreshToken');",
+                  "        pm.expect(newToken).to.not.equal(oldToken);",
+                  "        pm.collectionVariables.set('refreshToken', newToken);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Refresh reutilizado (detecção de roubo → 401)",
+          "description": "Usa o refresh token ANTERIOR (já rotacionado) — deve retornar 401 e revogar toda a sessão.",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Cookie", "value": "refresh_token={{refreshToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "refresh"]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Primeiro faz um refresh para rotacionar o token",
+                  "const baseUrl = pm.variables.get('baseUrl');",
+                  "const currentToken = pm.collectionVariables.get('refreshToken');",
+                  "",
+                  "pm.sendRequest({",
+                  "    url: baseUrl + '/api/v1/auth/refresh',",
+                  "    method: 'POST',",
+                  "    header: { 'Cookie': 'refresh_token=' + currentToken }",
+                  "}, (err, res) => {",
+                  "    if (err || res.code !== 200) return;",
+                  "    // Salva o novo token, mas a request principal vai usar o antigo (currentToken)",
+                  "    const setCookie = res.headers.get('Set-Cookie') || '';",
+                  "    const match = setCookie.match(/refresh_token=([^;]+)/);",
+                  "    if (match) pm.collectionVariables.set('refreshTokenNew', match[1]);",
+                  "    // mantém refreshToken = currentToken (antigo) para esta request",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401 — token reutilizado detectado', () => pm.response.to.have.status(401));",
+                  "",
+                  "pm.test('Código de erro de reutilização', function() {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.type).to.include('refresh-token-reuse-detected');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Cookie", "value": "refresh_token={{refreshToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "logout"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204 No Content', () => pm.response.to.have.status(204));",
+                  "",
+                  "pm.test('Cookie refresh_token removido', function() {",
+                  "    const setCookie = pm.response.headers.get('Set-Cookie') || '';",
+                  "    pm.expect(setCookie).to.include('refresh_token=');",
+                  "    pm.expect(setCookie).to.include('Max-Age=0');",
+                  "});",
+                  "",
+                  "// Limpa variáveis de sessão",
+                  "pm.collectionVariables.set('accessToken', '');",
+                  "pm.collectionVariables.set('refreshToken', '');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "🔑 Recuperação de Senha",
+      "description": "Fluxo: solicitar redefinição → MailHog extrai token → redefinir senha → login com nova senha",
+      "item": [
+        {
+          "name": "POST Solicitar redefinição de senha",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"email\": \"{{testEmail}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/password/forgot",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "password", "forgot"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Sem corpo (anti-enumeração de emails)', () => pm.expect(pm.response.text()).to.be.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Solicitar redefinição — email inexistente (anti-enumeração)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"email\": \"naoexiste@arenahub.test\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/password/forgot",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "password", "forgot"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 mesmo para email inexistente (anti-enumeração)', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET [MailHog] Buscar token de redefinição",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{mailhogUrl}}/api/v2/messages?limit=10",
+              "host": ["{{mailhogUrl}}"],
+              "path": ["api", "v2", "messages"],
+              "query": [{ "key": "limit", "value": "10" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('MailHog acessível', () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test('Email de redefinição encontrado', function() {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.items).to.be.an('array').and.not.be.empty;",
+                  "",
+                  "    const testEmail = pm.collectionVariables.get('testEmail');",
+                  "    const item = body.items.find(i =>",
+                  "        i.To && i.To.some(t => (t.Mailbox + '@' + t.Domain) === testEmail) &&",
+                  "        i.Content && i.Content.Headers &&",
+                  "        (i.Content.Headers.Subject || [''])[0].includes('Redefinição')",
+                  "    ) || body.items.find(i =>",
+                  "        i.Content && i.Content.Body && i.Content.Body.includes('reset-password')",
+                  "    ) || body.items[0];",
+                  "",
+                  "    pm.expect(item, 'Email de redefinição não encontrado').to.exist;",
+                  "",
+                  "    let emailBody = '';",
+                  "    if (item.Content && item.Content.Body) {",
+                  "        emailBody = item.Content.Body;",
+                  "    } else if (item.MIME && item.MIME.Parts) {",
+                  "        const html = item.MIME.Parts.find(p =>",
+                  "            p.Headers && p.Headers['Content-Type'] &&",
+                  "            p.Headers['Content-Type'][0].includes('text/html')",
+                  "        );",
+                  "        if (html) emailBody = html.Body;",
+                  "    }",
+                  "",
+                  "    const match = emailBody.match(/reset-password\\?token=([^\"&\\s<>\\r\\n]+)/);",
+                  "    pm.expect(match, 'Token de redefinição não encontrado no email').to.exist;",
+                  "    pm.collectionVariables.set('passwordResetToken', match[1]);",
+                  "    console.log('Token de redefinição salvo:', match[1].substring(0, 20) + '...');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Redefinir senha",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"token\": \"{{passwordResetToken}}\",\n  \"newPassword\": \"NovaSenha@456\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/password/reset",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "password", "reset"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "// Atualiza senha nos dados de teste",
+                  "pm.collectionVariables.set('testPassword', 'NovaSenha@456');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Redefinir senha — token já usado (400)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"token\": \"{{passwordResetToken}}\",\n  \"newPassword\": \"OutraSenha@789\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/password/reset",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "password", "reset"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 — token já utilizado', () => pm.response.to.have.status(400));",
+                  "",
+                  "pm.test('Mensagem de token inválido', function() {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.type).to.include('invalid-token');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Login com nova senha",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"NovaSenha@456\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "login"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login com nova senha retorna 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test('Novo access token emitido', function() {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.accessToken).to.be.a('string').and.not.be.empty;",
+                  "    pm.collectionVariables.set('accessToken', json.accessToken);",
+                  "});",
+                  "",
+                  "// Restaura senha original para o próximo run",
+                  "pm.collectionVariables.set('testPassword', 'Senha@123');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "❌ Validações & Erros",
+      "description": "Cenários de erro — podem ser executados independentemente",
+      "item": [
+        {
+          "name": "POST Registro — email duplicado (409)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"name\": \"{{testName}}\",\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\",\n  \"phone\": \"{{testPhone}}\",\n  \"birthDate\": \"1990-05-20\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "register"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409 Conflict', () => pm.response.to.have.status(409));",
+                  "",
+                  "pm.test('Problem Details RFC 7807 correto', function() {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.status).to.equal(409);",
+                  "    pm.expect(json.type).to.include('email-already-registered');",
+                  "    pm.expect(json.detail).to.be.a('string').and.not.be.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Registro — senha fraca (400)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"name\": \"Teste\",\n  \"email\": \"fraco@arenahub.test\",\n  \"password\": \"senha123\",\n  \"phone\": \"11999999999\",\n  \"birthDate\": \"1990-01-01\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "register"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));",
+                  "",
+                  "pm.test('Erro de validação de senha', function() {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.status).to.equal(400);",
+                  "    pm.expect(json.detail).to.be.a('string');",
+                  "    pm.expect(json.detail.toLowerCase()).to.include('senha');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Registro — campos obrigatórios ausentes (400)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"email\": \"incompleto@arenahub.test\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "register"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));",
+                  "",
+                  "pm.test('Problem Details com tipo validation-failed', function() {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.type).to.include('validation-failed');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Registro — telefone inválido (400)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"name\": \"Teste\",\n  \"email\": \"tel.invalido@arenahub.test\",\n  \"password\": \"Senha@123\",\n  \"phone\": \"1234\",\n  \"birthDate\": \"1990-01-01\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "register"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Login — credenciais inválidas (401)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"SenhaErrada@999\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "login"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401 Unauthorized', () => pm.response.to.have.status(401));",
+                  "",
+                  "pm.test('Mensagem genérica (não revela qual campo)', function() {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.type).to.include('invalid-credentials');",
+                  "    // Não deve mencionar 'email' ou 'senha' especificamente no type",
+                  "    pm.expect(json.detail).to.not.include('email incorreto');",
+                  "    pm.expect(json.detail).to.not.include('senha incorreta');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Login — email com formato inválido (400)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"email\": \"nao-e-email\",\n  \"password\": \"Senha@123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "login"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Refresh — token inválido (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Cookie", "value": "refresh_token=token-invalido-qualquer" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "refresh"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401 Unauthorized', () => pm.response.to.have.status(401));",
+                  "",
+                  "pm.test('Código de erro correto', function() {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.type).to.include('refresh-token-invalid');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Refresh — sem cookie (401)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "refresh"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401 sem cookie', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Redefinição — token inválido (400)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"token\": \"token-reset-invalido-aqui\",\n  \"newPassword\": \"Senha@123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/password/reset",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "password", "reset"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));",
+                  "",
+                  "pm.test('Tipo de erro correto', function() {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.type).to.include('invalid-token');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
