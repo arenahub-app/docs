@@ -11,12 +11,122 @@ SaaS multi-tenant para gestão de grupos esportivos amadores (presença, times, 
 | 1 — Documentação | ✅ Concluída |
 | 2 — Modelagem de Domínio | ✅ Concluída |
 | 3 — Banco de Dados | ✅ Concluída |
-| 4 — Backend | 🔜 Próxima |
-| 5 — Frontend | ⏳ |
-| 6 — Mobile | ⏳ |
-| 7 — Infraestrutura | ⏳ |
+| 4 — Backend, Módulo 1: Autenticação | ✅ Concluída |
+| 4.5 — CI/CD & Infraestrutura | 🚧 Em andamento |
+| 4.6 — Observabilidade (Grafana Cloud) | ⏳ |
+| 4.7 — Serviço de Mensageria Assíncrona | ⏳ |
+| 5+ — Features (backend + frontend juntos) | ⏳ |
+| Mobile | ⏳ Fase final |
 
-**Próximo passo:** Etapa 4 — Backend, módulo 1: Autenticação (registro, login, OAuth2 Google, JWT).
+**Próximo passo:** Etapa 4.6 — Observabilidade com Grafana Cloud (métricas OTLP, traces distribuídos, logs via Loki com expurgo configurado).
+
+---
+
+## Etapa 4.5 — CI/CD & Infraestrutura (PRÓXIMA)
+
+Deve ser concluída **antes** de qualquer nova feature. Contém dois blocos:
+
+### Bloco A — Melhorias de CI/CD
+
+| Item | Descrição |
+|---|---|
+| Separar unit/integration | Surefire (unit tests) + Failsafe (integration tests) para feedback mais rápido |
+| OWASP Dependency Check | Scan de vulnerabilidades nas dependências; executado semanalmente (não em todo PR) |
+| Coverage comment em PR | JaCoCo report publicado como comentário automático no PR via `madrapps/jacoco-report` |
+| Checkstyle | Regras básicas de estilo (permissivas para não quebrar o código atual) |
+
+### Bloco B — Infraestrutura & Ambiente Testável
+
+Serviços gratuitos a conectar:
+
+| Serviço | Plataforma | Uso |
+|---|---|---|
+| PostgreSQL | Neon (free tier) | Banco de dados (staging + prod) |
+| Email | Resend (free tier) | SMTP transacional |
+| Backend hosting | Fly.io (free tier) | Container Docker do Spring Boot |
+| Frontend hosting | Vercel (free tier) | SPA React |
+| Storage | Cloudflare R2 (free tier) | Upload de arquivos |
+| Container registry | GitHub Container Registry | Imagens Docker |
+
+Mudanças no pipeline após esta etapa:
+
+```
+Push → develop
+  └─► validate (testes + qualidade)
+  └─► versão semântica + tag
+  └─► build Docker → push GHCR
+  └─► deploy → staging (Fly.io)   ← NOVO
+  └─► PR automática → main (com URL do staging no corpo)
+
+Merge → main
+  └─► build Docker → push GHCR
+  └─► deploy → production (Fly.io)  ← NOVO
+  └─► GitHub Release criada automaticamente
+```
+
+Secrets a configurar no GitHub (após criar as contas):
+- `FLY_API_TOKEN` — token da CLI do Fly.io
+- `DATABASE_URL` — Neon staging (jdbc:postgresql://...)
+- `DATABASE_URL_PROD` — Neon production
+- `JWT_SECRET` / `JWT_SECRET_PROD`
+- `RESEND_API_KEY`
+- `FRONTEND_BASE_URL` / `FRONTEND_BASE_URL_PROD`
+- `R2_ENDPOINT`, `R2_ACCESS_KEY`, `R2_SECRET_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL`
+
+---
+
+## Etapa 4.7 — Serviço de Mensageria Assíncrona (FUTURA)
+
+Operações que não devem bloquear o request HTTP nem comprometer a transação principal:
+
+| Operação | Situação atual | Problema |
+|---|---|---|
+| Envio de email (verificação, reset, notificações) | `afterCommit()` síncrono | Lentidão e falha silenciosa sem retry |
+| Pagamentos (webhooks, confirmações) | Não implementado | Requer retry e idempotência |
+| Notificações push (mobile) | Não implementado | Alta volumetria, fire-and-forget |
+| Geração de relatórios | Não implementado | Processamento pesado off-request |
+
+### Opções gratuitas de message broker a avaliar
+
+| Serviço | Free tier | Pontos positivos | Limitações |
+|---|---|---|---|
+| **Upstash (Redis/QStash)** | 10.000 msg/dia, 500 req/dia (QStash) | Serverless, HTTP-based, retry nativo, delay, FIFO | Volume baixo |
+| **CloudAMQP (RabbitMQ)** | 1M msgs/mês, 20 conexões | RabbitMQ gerenciado, Spring AMQP nativo | 1 vhost, sem persistência longa |
+| **Render (Redis)** | 512 MB RAM, expira em 90 dias | Fácil integração com Railway | Redis puro — precisa implementar retry manual |
+| **Neon + cron job** | Já em uso no projeto | Zero infra nova — tabela de `outbox` + job que consome | Latência e complexidade do polling |
+
+### Padrão recomendado: Outbox Pattern
+
+Independente do broker escolhido, implementar o **Transactional Outbox Pattern**:
+
+```
+[Request HTTP]
+  └─► @Transactional: salva entidade + grava evento na tabela outbox (mesma tx)
+  └─► Job periódico (ex: @Scheduled 10s): lê outbox → publica no broker → marca como enviado
+```
+
+Vantagens: garante "at-least-once delivery" sem acoplamento direto ao broker na hora do request.
+
+### Decisão a tomar antes de implementar
+
+- Qual broker usar (avaliar volume esperado de emails/notificações por mês)
+- Se usar Outbox: definir schema da tabela e política de retry/dead-letter
+- Integração com o módulo de Pagamentos (Etapa 5+) para não duplicar esforço
+
+---
+
+## Estratégia de entrega (atualizada)
+
+Cada feature é entregue de forma completa e **sequencial**: backend implementado e deployado em staging primeiro, depois frontend integrado. Só então a feature vai para produção. Mobile fica para a fase final.
+
+Fluxo por feature:
+1. SDD (documentação da feature — contratos de API, telas, regras de negócio)
+2. Backend implementado + testes + deploy staging
+3. Frontend implementado + integrado ao staging
+4. Validação manual da experiência de usuário no ambiente testável
+5. PR → main → deploy produção (backend e frontend juntos)
+
+**Regra:** nenhuma feature vai para produção com apenas backend ou apenas frontend. Os dois lados sobem juntos.
 
 ## Repositórios GitHub
 
@@ -45,6 +155,7 @@ Organização: `arenahub-app`
 - **Branches:** `develop` (padrão) → PR → `main` (protegida)
 - **Cobertura mínima:** 80% (JaCoCo no backend)
 - **Sem comentários desnecessários no código**
+- **Testes obrigatórios em toda alteração de código:** qualquer mudança em código de produção deve ser acompanhada da atualização dos testes unitários e/ou de integração correspondentes. Não deixar coverage cair abaixo do mínimo configurado no JaCoCo.
 
 ## Stack
 
