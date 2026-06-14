@@ -17,6 +17,7 @@ SaaS multi-tenant para gestão de grupos esportivos amadores (presença, times, 
 | 4.6 — Observabilidade (Grafana Cloud) | ⏳ |
 | 4.7 — Serviço de Mensageria Assíncrona | ⏳ |
 | 5+ — Features (backend + frontend juntos) | ⏳ |
+| 5.9 — Domínio Personalizado (pré-produção) | ⏳ |
 | Mobile | ⏳ Fase final |
 
 **Próximo passo:** Etapa 4.6 — Observabilidade com Grafana Cloud (métricas OTLP, traces distribuídos, logs via Loki com expurgo configurado).
@@ -113,6 +114,22 @@ Vantagens: garante "at-least-once delivery" sem acoplamento direto ao broker na 
 - Qual broker usar (avaliar volume esperado de emails/notificações por mês)
 - Se usar Outbox: definir schema da tabela e política de retry/dead-letter
 - Integração com o módulo de Pagamentos (Etapa 5+) para não duplicar esforço
+
+---
+
+## Etapa 5.9 — Domínio Personalizado (pré-produção)
+
+Executar **antes do primeiro deploy em produção real**, após todas as features do MVP estarem prontas.
+
+| Item | Detalhe |
+|---|---|
+| Registrar domínio | Cloudflare Registrar (preço de custo, sem markup) — sugestões: `arenahub.app` (~$14/ano) ou `arenahub.com` (~$10/ano) |
+| DNS frontend | CNAME `arenahub.app` → Vercel (**DNS only**, sem proxy Cloudflare) |
+| DNS backend | CNAME `api.arenahub.app` → Railway (**DNS only**) |
+| Variáveis de ambiente | `FRONTEND_BASE_URL` no Railway → `https://arenahub.app`; `NEXT_PUBLIC_API_URL` na Vercel → `https://api.arenahub.app` |
+| SSL | Gerado automaticamente por Vercel e Railway após propagação DNS |
+
+> Até lá, usar as URLs geradas automaticamente para staging: Vercel preview URL + `backend-staging-production-2fe6.up.railway.app`.
 
 ---
 
