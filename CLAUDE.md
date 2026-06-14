@@ -12,6 +12,7 @@ SaaS multi-tenant para gestão de grupos esportivos amadores (presença, times, 
 | 2 — Modelagem de Domínio | ✅ Concluída |
 | 3 — Banco de Dados | ✅ Concluída |
 | 4 — Backend, Módulo 1: Autenticação | ✅ Concluída |
+| 4 — Frontend, Módulo 1: Autenticação | ✅ Concluída |
 | 4.5 — CI/CD & Infraestrutura | 🚧 Em andamento |
 | 4.6 — Observabilidade (Grafana Cloud) | ⏳ |
 | 4.7 — Serviço de Mensageria Assíncrona | ⏳ |
@@ -163,7 +164,7 @@ Organização: `arenahub-app`
 - **Auth:** Spring Security + OAuth2 Client (Google) + JWT stateless
 - **Storage:** Cloudflare R2 via AWS SDK v2
 - **Testes:** JUnit 5, Mockito, Testcontainers
-- **Frontend:** React 18, TypeScript, Vite, MUI, React Query, Zod (não iniciado)
+- **Frontend:** Next.js 16, React 19, TypeScript, Tailwind CSS, shadcn/ui (@base-ui/react), TanStack Query v5, Zod v4, react-hook-form, Vercel
 - **Mobile:** React Native + Expo (não iniciado)
 
 ## Arquitetura do backend
