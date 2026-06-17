@@ -18,14 +18,17 @@ SaaS multi-tenant para gestão de grupos esportivos amadores (presença, times, 
 | Feature 2 — Match & Presence | ✅ Produção |
 | Feature 3 — Team Formation | ✅ Produção |
 | Feature 4 — Skill Voting | 🔜 Próxima |
-| Feature 5 — Payments | 🔜 Alta prioridade |
+| Feature 5 — Payments | ✅ Produção |
 | Feature 6 — Financial | ⏳ |
+| Fix — Google OAuth | 🔜 Pendente |
 | 4.6 — Observabilidade (Grafana Cloud) | ⏳ Pós-MVP |
 | 4.7 — Serviço de Mensageria Assíncrona | ⏳ Pós-MVP |
 | 5.9 — Domínio Personalizado (pré-produção) | ⏳ |
 | Mobile | ⏳ Fase final |
 
 **Próximo passo:** Feature 4 — Skill Voting (SDD → backend → frontend → produção).
+
+> **Fix pendente — Google OAuth:** login/cadastro via Google não está funcionando em produção. O botão está desabilitado no frontend enquanto o problema não é investigado. Investigar configuração do OAuth2 Client no backend (callback URL, client-id/secret no ambiente de produção) e fluxo de redirect.
 
 ---
 
