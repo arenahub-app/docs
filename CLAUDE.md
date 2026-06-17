@@ -13,14 +13,19 @@ SaaS multi-tenant para gestão de grupos esportivos amadores (presença, times, 
 | 3 — Banco de Dados | ✅ Concluída |
 | 4 — Backend, Módulo 1: Autenticação | ✅ Concluída |
 | 4 — Frontend, Módulo 1: Autenticação | ✅ Concluída |
-| 4.5 — CI/CD & Infraestrutura | 🚧 Em andamento |
-| 4.6 — Observabilidade (Grafana Cloud) | ⏳ |
-| 4.7 — Serviço de Mensageria Assíncrona | ⏳ |
-| 5+ — Features (backend + frontend juntos) | ⏳ |
+| 4.5 — CI/CD & Infraestrutura | ✅ Concluída |
+| Feature 1 — Group Management | ✅ Produção |
+| Feature 2 — Match & Presence | ✅ Produção |
+| Feature 3 — Team Formation | ✅ Produção |
+| Feature 4 — Skill Voting | 🔜 Próxima |
+| Feature 5 — Payments | 🔜 Alta prioridade |
+| Feature 6 — Financial | ⏳ |
+| 4.6 — Observabilidade (Grafana Cloud) | ⏳ Pós-MVP |
+| 4.7 — Serviço de Mensageria Assíncrona | ⏳ Pós-MVP |
 | 5.9 — Domínio Personalizado (pré-produção) | ⏳ |
 | Mobile | ⏳ Fase final |
 
-**Próximo passo:** Etapa 4.6 — Observabilidade com Grafana Cloud (métricas OTLP, traces distribuídos, logs via Loki com expurgo configurado).
+**Próximo passo:** Feature 4 — Skill Voting (SDD → backend → frontend → produção).
 
 ---
 
